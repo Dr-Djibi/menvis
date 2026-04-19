@@ -1,7 +1,6 @@
 import ollama
 import sys
 import os
-import sys
 import subprocess
 from config import Config
 from skills.registry import MENVIS_TOOLS, MENVIS_SCHEMAS
@@ -11,115 +10,132 @@ from skills.memory_skills import get_all_memory_context
 def speak(text: str):
     """Utilise edge-tts pour prononcer la réponse et affiche la bulle virtuelle."""
     print(f"\n{Config.ASSISTANT_NAME}: {text}")
-    
+
     # Lancement de la bulle visuelle J.A.R.V.I.S (non bloquant)
     ui_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui/bubble.py")
     subprocess.Popen([sys.executable, ui_script, text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
+
     try:
-        # On exécute edge-tts dans un sous-processus sans bloquer la console de manière moche
-        # La voix par défaut française de edge-tts est "fr-FR-DeniseNeural" ou "fr-FR-HenriNeural"
-        voice = "fr-FR-HenriNeural" 
-        subprocess.run(["edge-tts", "--voice", voice, "--text", text, "--play"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception as e:
-        pass # Si edge-tts n'est pas dispo, on a au moins le texte
+        voice = "fr-FR-HenriNeural"
+        subprocess.run(
+            ["edge-tts", "--voice", voice, "--text", text, "--play"],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    except Exception:
+        pass  # Si edge-tts n'est pas dispo, le texte est déjà affiché
+
 
 class MenvisAssistant:
     def __init__(self):
-        self.model = Config.MODEL_NAME
-        self.system_prompt = Config.SYSTEM_PROMPT
-        self.tools = MENVIS_TOOLS
+        self.model   = Config.MODEL_NAME
+        self.tools   = MENVIS_TOOLS
         self.schemas = MENVIS_SCHEMAS
 
         # Injection de la mémoire persistante dans le prompt système
-        persistent_memory = get_all_memory_context()
-        full_system_prompt = self.system_prompt + "\n" + persistent_memory
+        persistent_memory  = get_all_memory_context()
+        full_system_prompt = Config.SYSTEM_PROMPT + "\n" + persistent_memory
 
-        # Historique de conversation
-        self.messages = [
-            {'role': 'system', 'content': full_system_prompt}
-        ]
+        self.messages = [{'role': 'system', 'content': full_system_prompt}]
 
+    # ──────────────────────────────────────────────────────────────────────
+    #  Moteur Principal – Multi-Tâches
+    # ──────────────────────────────────────────────────────────────────────
     def ask(self, user_prompt: str):
         self.messages.append({'role': 'user', 'content': user_prompt})
         print(f"[*] {Config.ASSISTANT_NAME} réfléchit...")
-        
+
         try:
             response = ollama.chat(
                 model=self.model,
                 messages=self.messages,
                 tools=self.schemas
             )
-            
             message = response['message']
 
+            # ── CAS 1 : Le modèle veut appeler des outils ──────────────────
             if message.get('tool_calls'):
+
+                # Ajouter le message assistant (avec ses demandes d'outils) UNE seule fois
+                self.messages.append(message)
+
+                tool_results = []
+
+                # Exécuter TOUS les outils demandés en séquence
                 for tool_call in message['tool_calls']:
                     func_name = tool_call['function']['name']
-                    args = tool_call['function']['arguments']
-                    
+                    args      = tool_call['function']['arguments']
+
                     if Config.DEBUG:
-                        print(f"  [DEBUG] Appel Outil: {func_name} | Args: {args}")
+                        print(f"  [⚙️] Outil: {func_name} | Args: {args}")
 
                     func = self.tools.get(func_name)
                     if func:
                         try:
                             result = func(**args)
                         except Exception as script_e:
-                            result = f"Erreur du script: {script_e}"
-                            
-                        self.messages.append(message)
-                        self.messages.append({
-                            'role': 'tool', 
-                            'name': func_name, 
-                            'content': str(result)
-                        })
-                        
-                        final_response = ollama.chat(model=self.model, messages=self.messages)
-                        final_text = final_response['message']['content']
-                        
-                        self.messages.append({'role': 'assistant', 'content': final_text})
-                        speak(final_text)
+                            result = f"Erreur d'exécution de {func_name}: {script_e}"
+                    else:
+                        result = f"Outil '{func_name}' non enregistré dans le registre."
 
+                    tool_results.append(f"• {func_name}: {result}")
+
+                    # Injecter le résultat de cet outil dans le contexte conversationnel
+                    self.messages.append({
+                        'role':    'tool',
+                        'name':    func_name,
+                        'content': str(result)
+                    })
+
+                print(f"  [✅] {len(tool_results)} tâche(s) exécutée(s) :")
+                for r in tool_results:
+                    print(f"    {r}")
+
+                # ── Une seule réponse finale qui synthétise tout ────────────
+                final_response = ollama.chat(model=self.model, messages=self.messages)
+                final_text     = final_response['message']['content']
+                self.messages.append({'role': 'assistant', 'content': final_text})
+                speak(final_text)
+
+            # ── CAS 2 : Réponse directe sans outil ─────────────────────────
             else:
                 final_text = message['content']
                 self.messages.append({'role': 'assistant', 'content': final_text})
                 speak(final_text)
 
         except Exception as e:
-            print(f"[!] Erreur: Assurez-vous d'avoir lancé 'ollama run {self.model}'. Détails: {e}")
+            err = f"Erreur système. Vérifiez qu'Ollama tourne avec 'ollama run {self.model}'. Détail : {e}"
+            print(f"[!] {err}")
 
+
+# ──────────────────────────────────────────────────────────────────────────
+#  Point d'entrée
+# ──────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     assistant = MenvisAssistant()
-    
+
     if len(sys.argv) > 1:
-        text = " ".join(sys.argv[1:])
-        assistant.ask(text)
+        # Mode commande unique en ligne
+        assistant.ask(" ".join(sys.argv[1:]))
     else:
-        print("="*60)
-        print(f"🚀 {Config.ASSISTANT_NAME} MAXIMUM EDITION INTÉGRÉE 🚀")
-        print(" Outils Chargés : Recherche Web, KDE Connect, Alarmes,")
-        print(" Fichiers, Volume, Info Système, Commandes Hyprland.")
-        print(" Voix TTS activée (HenriNeural).")
-        print(" Outils : Recherche Web, KDE Connect, Météo, etc.")
-        print(" Tapez '/v' pour parler au microphone, '/q' pour quitter.")
-        print("="*60)
-        
+        print("=" * 60)
+        print(f"🚀 {Config.ASSISTANT_NAME} – ÉDITION ULTRA 🚀")
+        print(f"  40+ compétences actives | Multi-tâches | Mémoire persistante")
+        print(f"  Voix TTS (HenriNeural) | Bulle UI | Daemon D-Bus")
+        print(f"  Dites 'arrête-toi' ou Ctrl+C pour quitter.")
+        print("=" * 60)
+
         while True:
             try:
-                # Écoute en boucle courte (4-5s) pour capter la parole
                 texte_vocal = listen_to_user(silent_mode=True)
-                
-                # Si du texte a été détecté, on répond
+
                 if texte_vocal:
-                    # Empêche la boucle de s'écouter elle-même (mot de réveil ou arrêt)
-                    if "arrête-toi" in texte_vocal.lower() or "désactiver" in texte_vocal.lower():
-                        speak("Assistant désactivé. Au revoir.")
+                    if any(w in texte_vocal.lower() for w in ["arrête-toi", "désactiver", "stop menvis"]):
+                        speak("Déconnexion. À bientôt, Chef.")
                         break
-                    
+
                     assistant.ask(texte_vocal)
-                    print("\n" + "="*40 + "\n") # Séparation visuelle après l'action
-                    
+                    print("\n" + "─" * 40 + "\n")
+
             except KeyboardInterrupt:
                 speak("Arrêt d'urgence. À bientôt.")
                 print("\nArrêt forcé.")
