@@ -33,7 +33,7 @@ cat << 'EOF' > "$BIN_DIR/menvis"
 # Exécution du cerveau
 cd "$(dirname "$(readlink -f "$0")")/../menvis" || cd "$HOME/menvis"
 source .venv/bin/activate
-python main.py "$@"
+python ui/gui.py "$@"
 EOF
 
 chmod +x "$BIN_DIR/menvis"

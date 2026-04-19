@@ -4,7 +4,7 @@ import sys
 def show_bubble(text: str, color: str = "#00ffcc"):
     root = tk.Tk()
     # Ce titre spécifique sera attrapé par Hyprland pour le transformer en widget flottant sans bordure !
-    root.title("MenvisBubble")
+    root.title("Menvis")
     
     # Design sombre élégant J.A.R.V.I.S
     bg_color = "#0f1419"
