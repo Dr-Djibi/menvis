@@ -111,16 +111,26 @@ class MenvisAssistant:
 #  Point d'entrée
 # ──────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+
+    # ── Mode GUI ────────────────────────────────────────────────────────────
+    if "--gui" in sys.argv:
+        # Lance l'interface graphique CustomTkinter
+        gui_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui", "gui.py")
+        subprocess.run([sys.executable, gui_script])
+        sys.exit(0)
+
+    # ── Mode terminal CLI ───────────────────────────────────────────────────
     assistant = MenvisAssistant()
 
     if len(sys.argv) > 1:
-        # Mode commande unique en ligne
+        # Commande unique passée en argument
         assistant.ask(" ".join(sys.argv[1:]))
     else:
         print("=" * 60)
         print(f"🚀 {Config.ASSISTANT_NAME} – ÉDITION ULTRA 🚀")
         print(f"  40+ compétences actives | Multi-tâches | Mémoire persistante")
         print(f"  Voix TTS (HenriNeural) | Bulle UI | Daemon D-Bus")
+        print(f"  Astuce : lancez avec --gui pour l'interface graphique.")
         print(f"  Dites 'arrête-toi' ou Ctrl+C pour quitter.")
         print("=" * 60)
 
