@@ -1,0 +1,14 @@
+# Python and System files
+__pycache__/
+*.pyc
+.venv/
+brain/notifications_cache.json
+brain/memory.json
+/notes/
+*.wav
+*.mp3
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

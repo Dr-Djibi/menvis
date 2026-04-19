@@ -1,0 +1,5 @@
+ollama
+psutil
+duckduckgo-search
+edge-tts
+faster-whisper
