@@ -10,6 +10,7 @@ from .keyboard_skills import KEYBOARD_TOOLS, KEYBOARD_SCHEMAS
 from .media_skills import MEDIA_TOOLS, MEDIA_SCHEMAS
 from .routine_skills import ROUTINE_TOOLS, ROUTINE_SCHEMAS
 from .notification_skills import NOTIF_TOOLS, NOTIF_SCHEMAS
+from .cool_skills import COOL_TOOLS, COOL_SCHEMAS
 
 # Combinaison dynamique de tous les dictionnaires d'outils
 MENVIS_TOOLS = {
@@ -22,8 +23,9 @@ MENVIS_TOOLS = {
     **KEYBOARD_TOOLS,
     **MEDIA_TOOLS,
     **ROUTINE_TOOLS,
-    **NOTIF_TOOLS
+    **NOTIF_TOOLS,
+    **COOL_TOOLS
 }
 
 # Combinaison dynamique de tous les schémas
-MENVIS_SCHEMAS = sys_schemas + PHONE_SCHEMAS + UTILITIES_SCHEMAS + WEB_SCHEMAS + MEMORY_SCHEMAS + OS_SCHEMAS + KEYBOARD_SCHEMAS + MEDIA_SCHEMAS + ROUTINE_SCHEMAS + NOTIF_SCHEMAS
+MENVIS_SCHEMAS = sys_schemas + PHONE_SCHEMAS + UTILITIES_SCHEMAS + WEB_SCHEMAS + MEMORY_SCHEMAS + OS_SCHEMAS + KEYBOARD_SCHEMAS + MEDIA_SCHEMAS + ROUTINE_SCHEMAS + NOTIF_SCHEMAS + COOL_SCHEMAS

@@ -8,6 +8,19 @@ BIN_DIR="$HOME/.local/bin"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 SERVICE_NAME="menvis-notif.service"
 
+if [ "$1" == "--update" ] || [ "$1" == "update" ]; then
+    echo "========================================="
+    echo "🔄 TÉLÉCHARGEMENT DE LA NOUVELLE CONSCIENCE..."
+    echo "========================================="
+    cd "$DIR"
+    git pull origin main
+    source .venv/bin/activate
+    pip install -r requirements.txt
+    systemctl --user restart "$SERVICE_NAME"
+    echo "✅ Mise à jour terminée avec succès."
+    exit 0
+fi
+
 echo "========================================="
 echo "🦾 INSTALLATION DE MENVIS V4 (DAEMON) 🦾"
 echo "========================================="
