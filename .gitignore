@@ -7,7 +7,7 @@ brain/memory.json
 /notes/
 *.wav
 *.mp3
-
+.env
 # IDE / OS
 .vscode/
 .idea/
