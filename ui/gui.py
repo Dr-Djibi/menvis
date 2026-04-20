@@ -8,6 +8,7 @@ import queue
 import random
 import tkinter as tk
 import math
+import ollama
 
 # ── Chemin racine du projet ────────────────────────────────────────────────
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -15,17 +16,17 @@ sys.path.insert(0, ROOT)
 
 from config import Config
 
-# ── Palette Catppuccin Macchiato (Holographic Edition) ───────────────────
+# ── Palette Catppuccin Macchiato (Pure Local Edition) ───────────────────
 COLORS = {
-    "bg": "#24273a",      # Fond principal
-    "fg": "#cad3f5",      # Texte
-    "accent": "#8aadf4",  # Bleu Saphir (Glow)
-    "subtext": "#a5adcb", # Gris bleu
-    "danger": "#ed8796",  # Rose/Rouge
-    "success": "#a6da95", # Vert
-    "wave": "#f5bde6",    # Rose Hologramme
-    "card": "#363a4f",    # Conteneur
-    "border": "#494d64"   # Bordures fines
+    "bg": "#24273a",      
+    "fg": "#cad3f5",      
+    "accent": "#f5bde6",  # Rose pour le mode local
+    "subtext": "#a5adcb", 
+    "danger": "#ed8796",  
+    "success": "#a6da95", 
+    "wave": "#8aadf4",    
+    "card": "#363a4f",    
+    "border": "#494d64"   
 }
 
 # ── File de sync Thread IA → Thread UI ────────────────────────────────────
@@ -34,13 +35,9 @@ EDGE_TTS_PATH = os.path.join(ROOT, ".venv", "bin", "edge-tts")
 
 def speak_gui(text: str, show_bubble=False):
     """Affiche le texte dans la GUI et joue le TTS."""
-    print(f"\n[MENVIS] {text}")
+    print(f"\n[MENVIS] {text}", flush=True)
     GUI_QUEUE.put({"type": "speak", "text": text})
     GUI_QUEUE.put({"type": "anim_start"})
-
-    if show_bubble:
-        ui_script = os.path.join(ROOT, "ui", "bubble.py")
-        subprocess.Popen([sys.executable, ui_script, text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _tts():
         try:
@@ -56,111 +53,112 @@ def speak_gui(text: str, show_bubble=False):
     threading.Thread(target=_tts, daemon=True).start()
 
 class MenvisAssistantGUI:
-    """Moteur IA proactif v3.0 Holographic (Gemini Flash Stable)."""
+    """Moteur IA Local (Ollama) - Zéro Cloud."""
     def __init__(self, callback_ready):
         self.ready = False
         self.callback_ready = callback_ready
-        self.client = None
+        self.messages = []
+        self.last_status = ""
         threading.Thread(target=self._late_init, daemon=True).start()
 
     def _late_init(self):
         try:
-            from google import genai
-            from google.genai import types
-            from skills.registry import MENVIS_TOOLS, MENVIS_SCHEMAS
+            from skills.registry import MENVIS_TOOLS, MENVIS_SCHEMAS, SURVIVAL_TOOLS, SURVIVAL_SCHEMAS
             from skills.memory_skills import get_all_memory_context
             
-            api_key = Config.GEMINI_API_KEY
-            if not api_key:
-                self.ready = "NEED_KEY"
-                self.callback_ready()
-                return
-
-            self.client = genai.Client(api_key=api_key)
-            self.model_id = "gemini-flash-latest" # Stable & Gratuit (1500 RPM)
-            self.tools_map = MENVIS_TOOLS
-            
-            gemini_functions = []
-            for s in MENVIS_SCHEMAS:
-                f = s.get('function', s)
-                gemini_functions.append({
-                    'name': f['name'],
-                    'description': f['description'],
-                    'parameters': f['parameters']
-                })
-            
-            self.gemini_tools = [{'function_declarations': gemini_functions}]
+            # Détection du mode survie pour la GUI
+            if Config.MODEL_NAME == "menvis-lite":
+                self.tools_map = SURVIVAL_TOOLS
+                self.schemas = SURVIVAL_SCHEMAS
+            else:
+                self.tools_map = MENVIS_TOOLS
+                self.schemas = MENVIS_SCHEMAS
             persistent_memory = get_all_memory_context()
             self.system_instruction = Config.SYSTEM_PROMPT + "\n" + persistent_memory
+
+            # Initialisation Ollama
+            self.model_id = Config.OLLAMA_MODEL
+            self.messages = [{'role': 'system', 'content': self.system_instruction}]
             
-            self.chat_session = self.client.chats.create(
-                model=self.model_id,
-                config=types.GenerateContentConfig(
-                    system_instruction=self.system_instruction,
-                    tools=self.gemini_tools
-                )
-            )
+            # Vérifier si Ollama est actif
+            ollama.list()
+
             self.ready = True
-            self.callback_ready()
+            GUI_QUEUE.put({"type": "status", "text": "NEXUS LOCAL ACTIF", "color": COLORS["success"]})
+            speak_gui("Menvis est prêt, Chef. Connexion Ollama établie.")
         except Exception as e:
-            GUI_QUEUE.put({"type": "status", "text": "RECONNEXION DU NEXUS..."})
-            print(f"[ERREUR] {e}")
+            with open("nexus_error.log", "a") as f:
+                import traceback
+                f.write(f"\n--- OLLAMA INIT ERROR ---\n{traceback.format_exc()}\n")
+            GUI_QUEUE.put({"type": "status", "text": "OLLAMA HORS-LIGNE"})
 
     def ask(self, user_prompt: str):
         if not self.ready: return
         try:
-            GUI_QUEUE.put({"type": "status", "text": "ANALYSE EN COURS..."})
-            response = self.chat_session.send_message(user_prompt)
+            start_time = time.time()
+            GUI_QUEUE.put({"type": "status", "text": "RÉFLEXION LOCALE [0s]..."})
             
-            while response.candidates[0].content.parts and response.candidates[0].content.parts[0].function_call:
-                tool_results = []
-                for part in response.candidates[0].content.parts:
-                    if part.function_call:
-                        func_name = part.function_call.name
-                        args = part.function_call.args
-                        func = self.tools_map.get(func_name)
-                        if func:
-                            try: res = func(**args)
-                            except Exception as e: res = f"Erreur : {e}"
-                        else: res = "Capacité indisponible."
-                        
-                        from google.genai import types
-                        tool_results.append(types.Part.from_function_response(
-                            name=func_name,
-                            response={'result': str(res)}
-                        ))
-                response = self.chat_session.send_message(tool_results)
+            def _update_reflection():
+                while "RÉFLEXION LOCALE" in self.last_status:
+                    elapsed = int(time.time() - start_time)
+                    GUI_QUEUE.put({"type": "status", "text": f"RÉFLEXION LOCALE [{elapsed}s]..."})
+                    time.sleep(1)
+            
+            self.last_status = "RÉFLEXION LOCALE"
+            threading.Thread(target=_update_reflection, daemon=True).start()
 
-            final_text = response.text
-            if final_text:
-                GUI_QUEUE.put({"type": "status", "text": "MENVIS CONNECTÉ"})
-                speak_gui(final_text)
+            self.messages.append({'role': 'user', 'content': user_prompt})
             
+            # Réactivation des outils pour le test
+            response = ollama.chat(model=self.model_id, messages=self.messages, tools=self.schemas)
+            message = response['message']
+            
+            # Boucle d'outils Locale
+            while message.get('tool_calls'):
+                self.messages.append(message)
+                for tool in message['tool_calls']:
+                    func_name = tool['function']['name']
+                    args = tool['function']['arguments']
+                    func = self.tools_map.get(func_name)
+                    res = func(**args) if func else "Erreur outil local."
+                    self.messages.append({'role': 'tool', 'name': func_name, 'content': str(res)})
+                
+                response = ollama.chat(model=self.model_id, messages=self.messages)
+                message = response['message']
+                
+            final_text = message['content']
+            self.messages.append({'role': 'assistant', 'content': final_text})
+            speak_gui(final_text)
+            self.last_status = "NEXUS LOCAL ACTIF"
+            GUI_QUEUE.put({"type": "status", "text": "NEXUS LOCAL ACTIF"})
+                
         except Exception as e:
-            msg = "Pause nécessaire, Chef." if "429" in str(e) else "Signal perturbé."
-            speak_gui(msg)
+            self.last_status = "ERREUR"
+            with open("nexus_error.log", "a") as f:
+                import traceback
+                f.write(f"\n--- OLLAMA ASK ERROR ---\n{traceback.format_exc()}\n")
+            speak_gui("Coupure du lien local. Relancez Ollama.")
 
 class MenvisGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
         ctk.set_appearance_mode("dark")
-        self.title(f"⚡ {Config.ASSISTANT_NAME} Holographic Edition")
+        self.title(f"⚡ {Config.ASSISTANT_NAME} - Local Pure Nexus")
         self.geometry("1150x880")
         self.configure(fg_color=COLORS["bg"])
 
-        self.assistant = MenvisAssistantGUI(self._on_ai_ready)
         self.recording_active = False
         self.animating = False
         self.anim_offset = 0
 
         self._setup_ui()
+        self.assistant = MenvisAssistantGUI(self._on_ai_ready)
         self.after(50, self._process_queue)
 
     def _setup_ui(self):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
-        # ── Header Bar ──────────────────────────────────────────────────
         self.header = ctk.CTkFrame(self, height=70, fg_color="transparent")
         self.header.grid(row=0, column=0, sticky="ew", padx=40, pady=(30, 0))
         
@@ -169,10 +167,9 @@ class MenvisGUI(ctk.CTk):
         
         self.status_frame = ctk.CTkFrame(self.header, fg_color=COLORS["card"], corner_radius=15)
         self.status_frame.pack(side="right", pady=5)
-        self.status_label = ctk.CTkLabel(self.status_frame, text="INITIALISATION...", font=("Inter", 11, "bold"), text_color=COLORS["subtext"], padx=15, pady=5)
+        self.status_label = ctk.CTkLabel(self.status_frame, text="CONNEXION LOCALE...", font=("Inter", 11, "bold"), text_color=COLORS["subtext"], padx=15, pady=5)
         self.status_label.pack()
 
-        # ── Chat Area (Card View) ─────────────────────────────────────────
         self.chat_container = ctk.CTkFrame(self, fg_color=COLORS["card"], corner_radius=30, border_width=2, border_color=COLORS["border"])
         self.chat_container.grid(row=1, column=0, sticky="nsew", padx=40, pady=30)
         self.chat_container.grid_columnconfigure(0, weight=1)
@@ -182,7 +179,6 @@ class MenvisGUI(ctk.CTk):
         self.log_box.grid(row=0, column=0, sticky="nsew")
         self.log_box.configure(state="disabled")
 
-        # ── Waveform / Particles Area ─────────────────────────────────────
         self.wave_frame = ctk.CTkFrame(self, height=120, fg_color="transparent")
         self.wave_frame.grid(row=2, column=0, sticky="ew", padx=40)
         
@@ -191,7 +187,6 @@ class MenvisGUI(ctk.CTk):
         self.bars = []
         self._init_bars()
 
-        # ── Input Area ────────────────────────────────────────────────────
         self.input_area = ctk.CTkFrame(self, height=120, fg_color="transparent")
         self.input_area.grid(row=3, column=0, sticky="ew", padx=40, pady=(0, 40))
         self.input_area.grid_columnconfigure(0, weight=1)
@@ -208,11 +203,8 @@ class MenvisGUI(ctk.CTk):
         self.btn_mic.grid(row=0, column=1)
 
     def _on_ai_ready(self):
-        if self.assistant.ready == "NEED_KEY":
-            self.status_label.configure(text="CLE API MANQUANTE", text_color=COLORS["danger"])
-        else:
-            self.status_label.configure(text="NEXUS PRÊT", text_color=COLORS["success"])
-            speak_gui("Menvis est prêt, Chef. Que puis-je faire pour vous ?")
+        self.status_label.configure(text="NEXUS LOCAL ACTIF", text_color=COLORS["success"])
+        speak_gui("Menvis est prêt, Chef. Connexion Ollama établie.")
 
     def write_log(self, text, sender):
         self.log_box.configure(state="normal")
@@ -228,7 +220,9 @@ class MenvisGUI(ctk.CTk):
             while True:
                 m = GUI_QUEUE.get_nowait()
                 if m["type"] == "speak": self.write_log(m["text"], Config.ASSISTANT_NAME)
-                elif m["type"] == "status": self.status_label.configure(text=m["text"])
+                elif m["type"] == "status": 
+                    color = m.get("color", COLORS["subtext"])
+                    self.status_label.configure(text=m["text"], text_color=color)
                 elif m["type"] == "anim_start": self.animating = True; self._animate()
                 elif m["type"] == "anim_stop": self.animating = False
         except queue.Empty: pass
@@ -261,7 +255,7 @@ class MenvisGUI(ctk.CTk):
         except Exception: self.recording_active = False
 
     def _init_bars(self):
-        w = 1000 # Largeur fixe pour l'onde
+        w = 1000 
         for i in range(80):
             x = (w / 80) * i + 40
             line = self.wave_canvas.create_line(x, 49, x, 51, fill=COLORS["border"], width=3, capstyle="round")
@@ -271,20 +265,16 @@ class MenvisGUI(ctk.CTk):
         if not self.animating: 
             for l, x in self.bars: self.wave_canvas.coords(l, x, 49, x, 51)
             return
-        
         self.anim_offset += 0.3
         for i, (l, x) in enumerate(self.bars):
-            # Onde sinusoïdale complexe
             amp = math.sin(self.anim_offset + i * 0.2) * 35
             h = abs(amp) + random.randint(2, 8)
             self.wave_canvas.coords(l, x, 50-h, x, 50+h)
-            
-            # Couleur changeante selon l'intensité
             color = COLORS["wave"] if h > 25 else COLORS["accent"]
             self.wave_canvas.itemconfig(l, fill=color)
-            
         self.after(40, self._animate)
 
 if __name__ == "__main__":
+    print("\n>>> NEXUS VERSION 2.2 (Pure Local) LOADED <<<", flush=True)
     app = MenvisGUI()
     app.mainloop()

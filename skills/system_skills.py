@@ -4,6 +4,7 @@ import os
 import psutil
 import requests
 import re
+from config import Config
 
 # ── Fonctions Utilitaires ──────────────────────────────────────────────────
 def get_current_time() -> str:
@@ -69,6 +70,11 @@ def open_folder(path: str) -> str:
 def switch_workspace(target_id: str) -> str:
     """Change l'espace de travail (workspace) actuel sur Hyprland."""
     try:
+        # Test de charge RAM (Survival Mode)
+        mem = psutil.virtual_memory().percent
+        if Config.DEBUG:
+            print(f"  [RAM] Avant switch: {mem}%")
+            
         subprocess.run(["hyprctl", "dispatch", "workspace", str(target_id)], check=True)
         return f"Passage sur le workspace {target_id}."
     except Exception as e:
@@ -203,6 +209,22 @@ TOOLS_SCHEMAS = [
                 },
                 'required': ['app_name', 'target_id']
             }
+        }
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'get_system_status',
+            'description': 'Récupère la charge CPU et la mémoire vive (RAM) disponible.',
+            'parameters': {'type': 'object', 'properties': {}}
+        }
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'close_active_window',
+            'description': 'Ferme la fenêtre actuellement active.',
+            'parameters': {'type': 'object', 'properties': {}}
         }
     }
 ]

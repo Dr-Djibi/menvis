@@ -3,7 +3,7 @@ import sys
 import os
 import subprocess
 from config import Config
-from skills.registry import MENVIS_TOOLS, MENVIS_SCHEMAS
+from skills.registry import MENVIS_TOOLS, MENVIS_SCHEMAS, SURVIVAL_TOOLS, SURVIVAL_SCHEMAS
 from skills.voice_input import listen_to_user
 from skills.memory_skills import get_all_memory_context
 
@@ -16,6 +16,9 @@ def speak(text: str):
     subprocess.Popen([sys.executable, ui_script, text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     try:
+        if os.getenv("MENVIS_NO_TTS"):
+            return
+
         voice = "fr-FR-HenriNeural"
         subprocess.run(
             ["edge-tts", "--voice", voice, "--text", text, "--play"],
@@ -27,10 +30,15 @@ def speak(text: str):
 
 class MenvisAssistant:
     def __init__(self):
-        self.model   = Config.MODEL_NAME
-        self.tools   = MENVIS_TOOLS
-        self.schemas = MENVIS_SCHEMAS
-
+        self.model = Config.MODEL_NAME
+        # Détection du mode survie (modèle léger)
+        if Config.MODEL_NAME == "menvis-lite":
+            self.tools   = SURVIVAL_TOOLS
+            self.schemas = SURVIVAL_SCHEMAS
+        else:
+            self.tools   = MENVIS_TOOLS
+            self.schemas = MENVIS_SCHEMAS
+            
         # Injection de la mémoire persistante dans le prompt système
         persistent_memory  = get_all_memory_context()
         full_system_prompt = Config.SYSTEM_PROMPT + "\n" + persistent_memory
@@ -42,7 +50,7 @@ class MenvisAssistant:
     # ──────────────────────────────────────────────────────────────────────
     def ask(self, user_prompt: str):
         self.messages.append({'role': 'user', 'content': user_prompt})
-        print(f"[*] {Config.ASSISTANT_NAME} réfléchit...")
+        # print(f"[*] {Config.ASSISTANT_NAME} réfléchit...") # Caché pour la pureté du terminal
 
         try:
             response = ollama.chat(
@@ -86,9 +94,10 @@ class MenvisAssistant:
                         'content': str(result)
                     })
 
-                print(f"  [✅] {len(tool_results)} tâche(s) exécutée(s) :")
-                for r in tool_results:
-                    print(f"    {r}")
+                if Config.DEBUG:
+                    print(f"  [✅] {len(tool_results)} tâche(s) exécutée(s) :")
+                    for r in tool_results:
+                        print(f"    {r}")
 
                 # ── Une seule réponse finale qui synthétise tout ────────────
                 final_response = ollama.chat(model=self.model, messages=self.messages)
@@ -126,13 +135,8 @@ if __name__ == "__main__":
         # Commande unique passée en argument
         assistant.ask(" ".join(sys.argv[1:]))
     else:
-        print("=" * 60)
-        print(f"🚀 {Config.ASSISTANT_NAME} – ÉDITION ULTRA 🚀")
-        print(f"  40+ compétences actives | Multi-tâches | Mémoire persistante")
-        print(f"  Voix TTS (HenriNeural) | Bulle UI | Daemon D-Bus")
-        print(f"  Astuce : lancez avec --gui pour l'interface graphique.")
-        print(f"  Dites 'arrête-toi' ou Ctrl+C pour quitter.")
-        print("=" * 60)
+        print(f"--- {Config.ASSISTANT_NAME} Édition Nexus (Local) ---")
+        print(f"Prêt. Dites 'arrête-toi' pour quitter.")
 
         while True:
             try:

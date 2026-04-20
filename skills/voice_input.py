@@ -29,11 +29,12 @@ def listen_to_user(silent_mode=True) -> str:
         os.remove(filename)
         transcription = transcription.strip()
         
-        # Ignorer les bruits parasites très courts
-        if len(transcription) < 3 or 'Sous-titres par' in transcription:
+        if not transcription:
             return ""
-            
-        print(f"\nVous (Vocal) : '{transcription}'")
+
+        # Effacer la ligne "Écoute..." avant d'afficher la transcription
+        print(" " * 20, end="\r") 
+        print(f"Vous : {transcription}")
         return transcription
         
     except ImportError:
