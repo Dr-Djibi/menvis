@@ -3,3 +3,5 @@ psutil
 duckduckgo-search
 edge-tts
 faster-whisper
+openai
+python-dotenv

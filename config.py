@@ -18,5 +18,10 @@ Règles :
     DEBUG = False
     
     # Moteur Local Pur (Ollama)
-    AI_PROVIDER = "ollama"
+    AI_PROVIDER = os.getenv("AI_PROVIDER", "openrouter")  # Par défaut OpenRouter si dispo
     OLLAMA_MODEL = "qwen2.5:0.5b"
+    
+    # Configuration OpenRouter
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+    OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+    OPENROUTER_MODEL = "google/gemini-2.0-flash-lite-preview-02-05:free"
