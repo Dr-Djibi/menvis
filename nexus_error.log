@@ -1,0 +1,32 @@
+
+--- INIT ERROR ---
+Traceback (most recent call last):
+  File "/home/menma/menvis/ui/gui.py", line 81, in _late_init
+    self.model_id = Config.OPENROUTER_MODEL
+                    ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'Config' has no attribute 'OPENROUTER_MODEL'. Did you mean: 'OPENROUTER_API_KEY'?
+
+
+--- INIT ERROR ---
+Traceback (most recent call last):
+  File "/home/menma/menvis/ui/gui.py", line 81, in _late_init
+    self.model_id = Config.OPENROUTER_MODEL
+                    ^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'Config' has no attribute 'OPENROUTER_MODEL'. Did you mean: 'OPENROUTER_API_KEY'?
+
+
+--- INIT ERROR ---
+Traceback (most recent call last):
+  File "/home/menma/menvis/ui/gui.py", line 78, in _late_init
+    self.system_instruction = Config.SYSTEM_PROMPT + "\n" + persistent_memory
+                              ^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'Config' has no attribute 'SYSTEM_PROMPT'
+
+
+--- INIT ERROR ---
+Traceback (most recent call last):
+  File "/home/menma/menvis/ui/gui.py", line 78, in _late_init
+    self.system_instruction = Config.SYSTEM_PROMPT + "\n" + persistent_memory
+                              ^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'Config' has no attribute 'SYSTEM_PROMPT'
+

@@ -1,27 +1,30 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv() # Charge les variables du fichier .env
+load_dotenv()
 
 class Config:
-    # Paramètres de l'IA
-    MODEL_NAME = 'menvis-lite'
-    SYSTEM_PROMPT = """Menvis, assistant IA local. 
-Règles :
-1. Réponses ULTRA-CONCISES (1-2 phrases). 
-2. Priorité aux OUTILS : switch_workspace, open_application, search_memory.
-3. Agis SANS permission.
-4. Mode Survie : Vitesse maximale."""
-    
-    # Autres paramètres globaux
     ASSISTANT_NAME = "Menvis"
     DEBUG = False
-    
-    # Moteur Local Pur (Ollama)
-    AI_PROVIDER = os.getenv("AI_PROVIDER", "openrouter")  # Par défaut OpenRouter si dispo
-    OLLAMA_MODEL = "qwen2.5:0.5b"
-    
-    # Configuration OpenRouter
-    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+    # ── 1. Groq ───────────────────────────────────────────────
+    GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
+    GROQ_BASE_URL  = "https://api.groq.com/openai/v1"
+    GROQ_MODEL     = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+
+    # ── 2. Gemini (endpoint compatible OpenAI) ────────────────
+    GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    GEMINI_MODEL    = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
+    # ── 3. OpenRouter ─────────────────────────────────────────
+    OPENROUTER_API_KEY  = os.getenv("OPENROUTER_API_KEY", "")
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-    OPENROUTER_MODEL = "google/gemini-2.0-flash-lite-preview-02-05:free"
+    OPENROUTER_MODEL    = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+
+    # ── 4. Ollama (local / fallback final) ────────────────────
+    OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+
+    # Ordre de la cascade (modifiable ici)
+    PROVIDER_CASCADE = ["groq", "gemini", "openrouter", "ollama"]

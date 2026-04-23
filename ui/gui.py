@@ -8,7 +8,8 @@ import queue
 import random
 import tkinter as tk
 import math
-import ollama
+from openai import OpenAI
+import json
 
 # ── Chemin racine du projet ────────────────────────────────────────────────
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,7 +21,7 @@ from config import Config
 COLORS = {
     "bg": "#24273a",      
     "fg": "#cad3f5",      
-    "accent": "#f5bde6",  # Rose pour le mode local
+    "accent": "#f5bde6",  
     "subtext": "#a5adcb", 
     "danger": "#ed8796",  
     "success": "#a6da95", 
@@ -53,7 +54,7 @@ def speak_gui(text: str, show_bubble=False):
     threading.Thread(target=_tts, daemon=True).start()
 
 class MenvisAssistantGUI:
-    """Moteur IA Local (Ollama) - Zéro Cloud."""
+    """Moteur IA via OpenRouter."""
     def __init__(self, callback_ready):
         self.ready = False
         self.callback_ready = callback_ready
@@ -65,79 +66,120 @@ class MenvisAssistantGUI:
         try:
             from skills.registry import MENVIS_TOOLS, MENVIS_SCHEMAS, SURVIVAL_TOOLS, SURVIVAL_SCHEMAS
             from skills.memory_skills import get_all_memory_context
+            from prompts.system import get_system_prompt
             
             # Détection du mode survie pour la GUI
-            if Config.MODEL_NAME == "menvis-lite":
+            if Config.OLLAMA_MODEL == "menvis-lite":
                 self.tools_map = SURVIVAL_TOOLS
                 self.schemas = SURVIVAL_SCHEMAS
             else:
                 self.tools_map = MENVIS_TOOLS
                 self.schemas = MENVIS_SCHEMAS
             persistent_memory = get_all_memory_context()
-            self.system_instruction = Config.SYSTEM_PROMPT + "\n" + persistent_memory
+            self.system_instruction = get_system_prompt() + "\n" + persistent_memory
 
-            # Initialisation Ollama
+            # Initialisation 100% Locale (Ollama)
             self.model_id = Config.OLLAMA_MODEL
+            self.client = OpenAI(
+                base_url=Config.OLLAMA_BASE_URL,
+                api_key="ollama",
+            )
             self.messages = [{'role': 'system', 'content': self.system_instruction}]
-            
-            # Vérifier si Ollama est actif
-            ollama.list()
 
             self.ready = True
-            GUI_QUEUE.put({"type": "status", "text": "NEXUS LOCAL ACTIF", "color": COLORS["success"]})
-            speak_gui("Menvis est prêt, Chef. Connexion Ollama établie.")
+            GUI_QUEUE.put({"type": "status", "text": "NEXUS ONLINE", "color": COLORS["success"]})
+            speak_gui("Menvis est prêt, Chef. Connexion Locale établie.")
         except Exception as e:
             with open("nexus_error.log", "a") as f:
                 import traceback
-                f.write(f"\n--- OLLAMA INIT ERROR ---\n{traceback.format_exc()}\n")
+                f.write(f"\n--- INIT ERROR ---\n{traceback.format_exc()}\n")
             GUI_QUEUE.put({"type": "status", "text": "OLLAMA HORS-LIGNE"})
 
     def ask(self, user_prompt: str):
         if not self.ready: return
         try:
             start_time = time.time()
-            GUI_QUEUE.put({"type": "status", "text": "RÉFLEXION LOCALE [0s]..."})
+            GUI_QUEUE.put({"type": "status", "text": "RÉFLEXION [0s]..."})
             
             def _update_reflection():
-                while "RÉFLEXION LOCALE" in self.last_status:
+                while "RÉFLEXION" in self.last_status:
                     elapsed = int(time.time() - start_time)
-                    GUI_QUEUE.put({"type": "status", "text": f"RÉFLEXION LOCALE [{elapsed}s]..."})
+                    GUI_QUEUE.put({"type": "status", "text": f"RÉFLEXION [{elapsed}s]..."})
                     time.sleep(1)
             
-            self.last_status = "RÉFLEXION LOCALE"
+            self.last_status = "RÉFLEXION"
             threading.Thread(target=_update_reflection, daemon=True).start()
 
             self.messages.append({'role': 'user', 'content': user_prompt})
             
-            # Réactivation des outils pour le test
-            response = ollama.chat(model=self.model_id, messages=self.messages, tools=self.schemas)
-            message = response['message']
+            kwargs = {
+                "model": self.model_id,
+                "messages": self.messages,
+            }
+            if self.schemas:
+                kwargs["tools"] = [{"type": "function", "function": s} for s in self.schemas]
+                
+            try:
+                response = self.client.chat.completions.create(**kwargs)
+            except Exception as e:
+                if "400" in str(e) or getattr(e, 'status_code', None) == 400:
+                    if "tools" in kwargs:
+                        del kwargs["tools"]
+                    response = self.client.chat.completions.create(**kwargs)
+                else:
+                    raise e
+                    
+            message = response.choices[0].message
+            role = message.role
+            content = message.content
+            tool_calls = message.tool_calls
             
-            # Boucle d'outils Locale
-            while message.get('tool_calls'):
-                self.messages.append(message)
-                for tool in message['tool_calls']:
-                    func_name = tool['function']['name']
-                    args = tool['function']['arguments']
+            msg_dict = {'role': role, 'content': content}
+            
+            while tool_calls:
+                msg_dict['tool_calls'] = [
+                    {
+                        'id': tc.id,
+                        'type': 'function',
+                        'function': {
+                            'name': tc.function.name,
+                            'arguments': json.loads(tc.function.arguments)
+                        }
+                    } for tc in tool_calls
+                ]
+                self.messages.append(message) # Append object directly
+                for tool in tool_calls:
+                    func_name = tool.function.name
+                    args = json.loads(tool.function.arguments)
                     func = self.tools_map.get(func_name)
-                    res = func(**args) if func else "Erreur outil local."
-                    self.messages.append({'role': 'tool', 'name': func_name, 'content': str(res)})
+                    res = func(**args) if func else "Erreur outil."
+                    self.messages.append({
+                        'role': 'tool', 
+                        'tool_call_id': tool.id,
+                        'name': func_name, 
+                        'content': str(res)
+                    })
                 
-                response = ollama.chat(model=self.model_id, messages=self.messages)
-                message = response['message']
+                response = self.client.chat.completions.create(model=self.model_id, messages=self.messages)
+                message = response.choices[0].message
+                role = message.role
+                content = message.content
+                tool_calls = message.tool_calls
+                msg_dict = {'role': role, 'content': content}
                 
-            final_text = message['content']
+            final_text = content
             self.messages.append({'role': 'assistant', 'content': final_text})
             speak_gui(final_text)
-            self.last_status = "NEXUS LOCAL ACTIF"
-            GUI_QUEUE.put({"type": "status", "text": "NEXUS LOCAL ACTIF"})
+            self.last_status = "NEXUS ONLINE"
+            GUI_QUEUE.put({"type": "status", "text": "NEXUS ONLINE"})
                 
         except Exception as e:
             self.last_status = "ERREUR"
             with open("nexus_error.log", "a") as f:
                 import traceback
-                f.write(f"\n--- OLLAMA ASK ERROR ---\n{traceback.format_exc()}\n")
-            speak_gui("Coupure du lien local. Relancez Ollama.")
+                f.write(f"\n--- ASK ERROR ---\n{traceback.format_exc()}\n")
+            speak_gui("Coupure du lien. Vérifiez Ollama.")
+
 
 class MenvisGUI(ctk.CTk):
     def __init__(self):
@@ -203,8 +245,8 @@ class MenvisGUI(ctk.CTk):
         self.btn_mic.grid(row=0, column=1)
 
     def _on_ai_ready(self):
-        self.status_label.configure(text="NEXUS LOCAL ACTIF", text_color=COLORS["success"])
-        speak_gui("Menvis est prêt, Chef. Connexion Ollama établie.")
+        self.status_label.configure(text="NEXUS ONLINE", text_color=COLORS["success"])
+        speak_gui("Menvis est prêt, Chef. Connexion API établie.")
 
     def write_log(self, text, sender):
         self.log_box.configure(state="normal")

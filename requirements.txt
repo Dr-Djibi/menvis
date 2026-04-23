@@ -1,4 +1,4 @@
-ollama
+
 psutil
 duckduckgo-search
 edge-tts

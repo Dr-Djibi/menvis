@@ -1,7 +1,7 @@
 # Menvis - Conscience Artificielle / Assistant Local (Style J.A.R.V.I.S)
 
 Menvis est un assistant virtuel d'intelligence artificielle locale conçu spécifiquement pour les systèmes Linux, focalisé sur l'environnement **EndeavourOS / Hyprland**. 
-Entièrement hors ligne, il utilise **Ollama** (`qwen2.5:1.5b`) et offre une interface vocale bidirectionnelle continue sans sollicitation textuelle.
+Entièrement connecté via API, il utilise **OpenRouter** et offre une interface vocale bidirectionnelle continue sans sollicitation textuelle.
 
 ## 🚀 Fonctionnalités
 - **Écoute Continue & Synthèse Vocale :** Conversation 100% à la voix via `faster-whisper` (micro) et `edge-tts` (voix naturelle fluide).
@@ -19,7 +19,7 @@ Entièrement hors ligne, il utilise **Ollama** (`qwen2.5:1.5b`) et offre une int
 ## 📦 Installation des dépendances Système (Arch Linux)
 Vous aurez besoin des paquets suivants :
 ```bash
-yay -S ollama alsa-utils pamixer wtype playerctl hyprland mako
+yay -S alsa-utils pamixer wtype playerctl hyprland mako
 ```
 
 ## ⚙️ Intégration Visuelle (Hyprland)

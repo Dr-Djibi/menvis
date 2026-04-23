@@ -11,9 +11,10 @@ from .keyboard_skills import KEYBOARD_TOOLS, KEYBOARD_SCHEMAS
 from .media_skills import MEDIA_TOOLS, MEDIA_SCHEMAS
 from .routine_skills import ROUTINE_TOOLS, ROUTINE_SCHEMAS
 from .notification_skills import NOTIF_TOOLS, NOTIF_SCHEMAS
-from .cool_skills import COOL_TOOLS, COOL_SCHEMAS
+from .leisure_skills import COOL_TOOLS as LEISURE_TOOLS, COOL_SCHEMAS as LEISURE_SCHEMAS
 from .extra_skills import EXTRA_TOOLS, EXTRA_SCHEMAS
-from .smart_skills import SMART_TOOLS, SMART_SCHEMAS
+from .file_management_skills import SMART_TOOLS as FILE_TOOLS, SMART_SCHEMAS as FILE_SCHEMAS
+from .coding_skills import CODING_TOOLS, CODING_SCHEMAS
 
 # Combinaison dynamique de tous les dictionnaires d'outils
 MENVIS_TOOLS = {
@@ -28,13 +29,14 @@ MENVIS_TOOLS = {
     **MEDIA_TOOLS,
     **ROUTINE_TOOLS,
     **NOTIF_TOOLS,
-    **COOL_TOOLS,
+    **LEISURE_TOOLS,
     **EXTRA_TOOLS,
-    **SMART_TOOLS
+    **FILE_TOOLS,
+    **CODING_TOOLS
 }
 
 # Combinaison dynamique de tous les schémas
-MENVIS_SCHEMAS = sys_schemas + adb_schemas + PHONE_SCHEMAS + UTILITIES_SCHEMAS + WEB_SCHEMAS + MEMORY_SCHEMAS + OS_SCHEMAS + KEYBOARD_SCHEMAS + MEDIA_SCHEMAS + ROUTINE_SCHEMAS + NOTIF_SCHEMAS + COOL_SCHEMAS + EXTRA_SCHEMAS + SMART_SCHEMAS
+MENVIS_SCHEMAS = sys_schemas + adb_schemas + PHONE_SCHEMAS + UTILITIES_SCHEMAS + WEB_SCHEMAS + MEMORY_SCHEMAS + OS_SCHEMAS + KEYBOARD_SCHEMAS + MEDIA_SCHEMAS + ROUTINE_SCHEMAS + NOTIF_SCHEMAS + LEISURE_SCHEMAS + EXTRA_SCHEMAS + FILE_SCHEMAS + CODING_SCHEMAS
 
 # ── Mode Survie (Survival Mode) – Pour modèles < 1B paramètres ───────────
 # On ne garde que l'essentiel pour éviter la surcharge cognitive du modèle
