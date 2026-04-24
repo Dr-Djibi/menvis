@@ -1,4 +1,5 @@
 import json
+import time
 from openai import OpenAI
 from config import Config
 from skills.registry import MENVIS_TOOLS, MENVIS_SCHEMAS, SURVIVAL_TOOLS, SURVIVAL_SCHEMAS
@@ -36,7 +37,7 @@ def _is_limit_error(e: Exception) -> bool:
     return code in (429, 401, 403, 503) or any(
         k in msg for k in ["rate limit", "quota", "limit exceeded",
                             "too many", "unavailable", "decommissioned",
-                            "model_decommissioned"]
+                            "model_decommissioned", "authentication"]
     )
 
 
@@ -45,7 +46,6 @@ class MenvisAgent:
         self.cascade  = Config.PROVIDER_CASCADE
         self._init_provider(self.cascade[0])
 
-    # ── Initialisation d'un provider ─────────────────────────────────────────
     def _init_provider(self, provider: str):
         self.provider = provider
         self.client, self.model = _build_client(provider)
@@ -57,8 +57,8 @@ class MenvisAgent:
         else:
             self.tools, self.schemas = MENVIS_TOOLS, MENVIS_SCHEMAS
 
-    # ── Appel API avec cascade automatique ───────────────────────────────────
     def _call_api(self, kwargs: dict):
+        """Appel API avec gestion de la cascade."""
         providers_to_try = self.cascade[self.cascade.index(self.provider):]
 
         for provider in providers_to_try:
@@ -70,87 +70,83 @@ class MenvisAgent:
                 return self.client.chat.completions.create(**kwargs)
 
             except Exception as e:
-                # Cas spécial : outils non supportés sur ce provider → réessayer sans
-                if "tools" in kwargs and (
-                    getattr(e, "status_code", None) == 400 or "400" in str(e)
-                ):
-                    print(f"[!] {PROVIDER_ICONS.get(provider)} : outils ignorés, mode simple...")
-                    kw2 = {k: v for k, v in kwargs.items() if k != "tools"}
-                    try:
-                        return self.client.chat.completions.create(**kw2)
-                    except Exception as e2:
-                        e = e2  # propager l'erreur originale pour le fallback
+                if "tools" in kwargs:
+                    print(f"[DEBUG API Error] {e}") 
+                    if (getattr(e, "status_code", None) == 400 or "400" in str(e)):
+                        print(f"[!] {PROVIDER_ICONS.get(provider)} : outils non supportés, mode simple...")
+                        kw_no_tools = {k: v for k, v in kwargs.items() if k != "tools"}
+                        try:
+                            return self.client.chat.completions.create(**kw_no_tools)
+                        except Exception as e2:
+                            e = e2
 
                 if _is_limit_error(e):
-                    next_providers = self.cascade[self.cascade.index(provider) + 1:]
-                    if next_providers:
-                        print(f"[!] {PROVIDER_ICONS.get(provider)} indisponible → bascule sur {PROVIDER_ICONS.get(next_providers[0])}...")
+                    next_idx = self.cascade.index(provider) + 1
+                    if next_idx < len(self.cascade):
+                        print(f"[!] {PROVIDER_ICONS.get(provider)} indisponible/limité → Fallback...")
                         continue
                     else:
-                        raise RuntimeError("❌ Tous les providers sont épuisés.") from e
+                        raise e
                 else:
                     raise e
+        return None
 
-        raise RuntimeError("❌ Cascade épuisée sans réponse.")
-
-    # ── Génération de réponse ────────────────────────────────────────────────
     def generate_response(self, user_prompt: str, persistent_memory: str = "") -> str:
-        full_system_prompt = get_system_prompt()
+        """Génération de réponse avec boucle d'outils et anti-verbosité."""
+        final_system_prompt = get_system_prompt()
         if persistent_memory:
-            full_system_prompt += "\n\n# Mémoire Persistante\n" + persistent_memory
+            final_system_prompt += "\n\n# MÉMOIRE\n" + persistent_memory
 
         messages = [
-            {"role": "system",  "content": full_system_prompt},
+            {"role": "system",  "content": final_system_prompt},
             {"role": "user",    "content": user_prompt},
         ]
 
-        kwargs = {
-            "model":       self.model,
-            "messages":    messages,
-            "temperature": 0.3,
-        }
-        if self.schemas:
-            kwargs["tools"] = [{"type": "function", "function": s} for s in self.schemas]
+        max_turns = 5
+        for i in range(max_turns):
+            kwargs = {
+                "model":       self.model,
+                "messages":    messages,
+                "temperature": 0.1,
+            }
+            if self.schemas:
+                # Nos schémas sont déjà au bon format {"type": "function", "function": ...}
+                kwargs["tools"] = self.schemas
 
-        response = self._call_api(kwargs)
-        message  = response.choices[0].message
+            response = self._call_api(kwargs)
+            if not response: return "Erreur : Échec cascade."
 
-        # ── Appels d'outils ──────────────────────────────────────────────────
-        if message.tool_calls:
-            messages.append(message)
+            msg = response.choices[0].message
+            
+            # Anti-Yapping : Si le modèle commence à expliquer son plan au lieu de faire l'outil
+            if not msg.tool_calls and i == 0:
+                content = str(msg.content).lower()
+                if any(x in content for x in ["vais prendre", "utiliser", "plan d'action", "étape"]):
+                    if self.schemas:
+                        messages.append({"role": "user", "content": "OPÉRATIONNEL : N'explique rien. Appelle l'outil immédiatement."})
+                        continue
 
-            for tool_call in message.tool_calls:
+            messages.append(msg)
+            if not msg.tool_calls: return msg.content
+
+            # Exécution des outils
+            for tool_call in msg.tool_calls:
                 func_name = tool_call.function.name
-                try:
-                    args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    args = {}
-
-                if Config.DEBUG:
-                    print(f"  [⚙️] Outil : {func_name} | Args : {args}")
+                try: args = json.loads(tool_call.function.arguments)
+                except: args = {}
 
                 func = self.tools.get(func_name)
-                result = func(**args) if func else f"Erreur: outil '{func_name}' inconnu."
                 if func:
-                    try:
-                        result = func(**args)
-                    except Exception as err:
-                        result = f"Erreur outil : {err}"
+                    try: result = func(**args)
+                    except Exception as err: result = f"Erreur : {err}"
+                else:
+                    result = f"Outil '{func_name}' inconnu."
 
                 messages.append({
-                    "role":         "tool",
+                    "role": "tool",
                     "tool_call_id": tool_call.id,
-                    "name":         func_name,
-                    "content":      str(result),
+                    "name": func_name,
+                    "content": str(result),
                 })
-
-            # Deuxième passe (résultats → LLM)
-            try:
-                final = self.client.chat.completions.create(
-                    model=self.model, messages=messages, temperature=0.3
-                )
-                return final.choices[0].message.content
-            except Exception as e:
-                return f"Erreur après l'action : {e}"
-
-        return message.content
+        
+        return "Erreur : Boucle infinie outils."

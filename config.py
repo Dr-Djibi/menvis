@@ -5,7 +5,7 @@ load_dotenv()
 
 class Config:
     ASSISTANT_NAME = "Menvis"
-    DEBUG = False
+    DEBUG = True
 
     # ── 1. Groq ───────────────────────────────────────────────
     GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
@@ -26,5 +26,5 @@ class Config:
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
     OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
 
-    # Ordre de la cascade (modifiable ici)
-    PROVIDER_CASCADE = ["groq", "gemini", "openrouter", "ollama"]
+    # Ordre de la cascade (Gemini en premier pour la fiabilité des outils)
+    PROVIDER_CASCADE = ["gemini", "groq", "openrouter", "ollama"]

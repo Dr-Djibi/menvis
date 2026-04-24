@@ -54,138 +54,65 @@ def speak_gui(text: str, show_bubble=False):
     threading.Thread(target=_tts, daemon=True).start()
 
 class MenvisAssistantGUI:
-    """Moteur IA via OpenRouter."""
+    """Moteur IA cascade : Groq → Gemini → OpenRouter → Ollama."""
     def __init__(self, callback_ready):
         self.ready = False
         self.callback_ready = callback_ready
-        self.messages = []
+        self.agent = None
         self.last_status = ""
         threading.Thread(target=self._late_init, daemon=True).start()
 
     def _late_init(self):
         try:
-            from skills.registry import MENVIS_TOOLS, MENVIS_SCHEMAS, SURVIVAL_TOOLS, SURVIVAL_SCHEMAS
-            from skills.memory_skills import get_all_memory_context
-            from prompts.system import get_system_prompt
-            
-            # Détection du mode survie pour la GUI
-            if Config.OLLAMA_MODEL == "menvis-lite":
-                self.tools_map = SURVIVAL_TOOLS
-                self.schemas = SURVIVAL_SCHEMAS
-            else:
-                self.tools_map = MENVIS_TOOLS
-                self.schemas = MENVIS_SCHEMAS
-            persistent_memory = get_all_memory_context()
-            self.system_instruction = get_system_prompt() + "\n" + persistent_memory
-
-            # Initialisation 100% Locale (Ollama)
-            self.model_id = Config.OLLAMA_MODEL
-            self.client = OpenAI(
-                base_url=Config.OLLAMA_BASE_URL,
-                api_key="ollama",
-            )
-            self.messages = [{'role': 'system', 'content': self.system_instruction}]
-
+            from agent.client import MenvisAgent
+            self.agent = MenvisAgent()
             self.ready = True
-            GUI_QUEUE.put({"type": "status", "text": "NEXUS ONLINE", "color": COLORS["success"]})
-            speak_gui("Menvis est prêt, Chef. Connexion Locale établie.")
+            provider_label = self.agent.provider.upper()
+            GUI_QUEUE.put({"type": "status", "text": f"NEXUS ONLINE [{provider_label}]", "color": COLORS["success"]})
+            speak_gui(f"Menvis est prêt, Chef. Provider actif : {self.agent.provider}.")
         except Exception as e:
             with open("nexus_error.log", "a") as f:
                 import traceback
                 f.write(f"\n--- INIT ERROR ---\n{traceback.format_exc()}\n")
-            GUI_QUEUE.put({"type": "status", "text": "OLLAMA HORS-LIGNE"})
+            GUI_QUEUE.put({"type": "status", "text": "ERREUR INIT"})
 
     def ask(self, user_prompt: str):
-        if not self.ready: return
+        if not self.ready or not self.agent: return
         try:
             start_time = time.time()
+            self.last_status = "RÉFLEXION"
             GUI_QUEUE.put({"type": "status", "text": "RÉFLEXION [0s]..."})
-            
+
             def _update_reflection():
                 while "RÉFLEXION" in self.last_status:
                     elapsed = int(time.time() - start_time)
                     GUI_QUEUE.put({"type": "status", "text": f"RÉFLEXION [{elapsed}s]..."})
                     time.sleep(1)
-            
-            self.last_status = "RÉFLEXION"
             threading.Thread(target=_update_reflection, daemon=True).start()
 
-            self.messages.append({'role': 'user', 'content': user_prompt})
-            
-            kwargs = {
-                "model": self.model_id,
-                "messages": self.messages,
-            }
-            if self.schemas:
-                kwargs["tools"] = [{"type": "function", "function": s} for s in self.schemas]
-                
-            try:
-                response = self.client.chat.completions.create(**kwargs)
-            except Exception as e:
-                if "400" in str(e) or getattr(e, 'status_code', None) == 400:
-                    if "tools" in kwargs:
-                        del kwargs["tools"]
-                    response = self.client.chat.completions.create(**kwargs)
-                else:
-                    raise e
-                    
-            message = response.choices[0].message
-            role = message.role
-            content = message.content
-            tool_calls = message.tool_calls
-            
-            msg_dict = {'role': role, 'content': content}
-            
-            while tool_calls:
-                msg_dict['tool_calls'] = [
-                    {
-                        'id': tc.id,
-                        'type': 'function',
-                        'function': {
-                            'name': tc.function.name,
-                            'arguments': json.loads(tc.function.arguments)
-                        }
-                    } for tc in tool_calls
-                ]
-                self.messages.append(message) # Append object directly
-                for tool in tool_calls:
-                    func_name = tool.function.name
-                    args = json.loads(tool.function.arguments)
-                    func = self.tools_map.get(func_name)
-                    res = func(**args) if func else "Erreur outil."
-                    self.messages.append({
-                        'role': 'tool', 
-                        'tool_call_id': tool.id,
-                        'name': func_name, 
-                        'content': str(res)
-                    })
-                
-                response = self.client.chat.completions.create(model=self.model_id, messages=self.messages)
-                message = response.choices[0].message
-                role = message.role
-                content = message.content
-                tool_calls = message.tool_calls
-                msg_dict = {'role': role, 'content': content}
-                
-            final_text = content
-            self.messages.append({'role': 'assistant', 'content': final_text})
+            # Appel via la cascade MenvisAgent
+            from skills.memory_skills import get_all_memory_context
+            memory = get_all_memory_context()
+            final_text = self.agent.generate_response(user_prompt, persistent_memory=memory)
+
             speak_gui(final_text)
-            self.last_status = "NEXUS ONLINE"
-            GUI_QUEUE.put({"type": "status", "text": "NEXUS ONLINE"})
-                
+            self.last_status = f"NEXUS ONLINE [{self.agent.provider.upper()}]"
+            GUI_QUEUE.put({"type": "status", "text": self.last_status, "color": COLORS["success"]})
+
         except Exception as e:
             self.last_status = "ERREUR"
             with open("nexus_error.log", "a") as f:
                 import traceback
                 f.write(f"\n--- ASK ERROR ---\n{traceback.format_exc()}\n")
-            speak_gui("Coupure du lien. Vérifiez Ollama.")
+            speak_gui(f"Erreur : {str(e)[:80]}")
+            GUI_QUEUE.put({"type": "status", "text": "ERREUR", "color": COLORS["danger"]})
 
 
 class MenvisGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
         ctk.set_appearance_mode("dark")
-        self.title(f"⚡ {Config.ASSISTANT_NAME} - Local Pure Nexus")
+        self.title(f"⚡ {Config.ASSISTANT_NAME} - Nexus Cascade [Groq → Gemini → OpenRouter → Ollama]")
         self.geometry("1150x880")
         self.configure(fg_color=COLORS["bg"])
 
@@ -194,6 +121,8 @@ class MenvisGUI(ctk.CTk):
         self.anim_offset = 0
 
         self._setup_ui()
+        from skills.voice_input import ManualRecorder
+        self.recorder = ManualRecorder()
         self.assistant = MenvisAssistantGUI(self._on_ai_ready)
         self.after(50, self._process_queue)
 
@@ -209,7 +138,7 @@ class MenvisGUI(ctk.CTk):
         
         self.status_frame = ctk.CTkFrame(self.header, fg_color=COLORS["card"], corner_radius=15)
         self.status_frame.pack(side="right", pady=5)
-        self.status_label = ctk.CTkLabel(self.status_frame, text="CONNEXION LOCALE...", font=("Inter", 11, "bold"), text_color=COLORS["subtext"], padx=15, pady=5)
+        self.status_label = ctk.CTkLabel(self.status_frame, text="CONNEXION CASCADE...", font=("Inter", 11, "bold"), text_color=COLORS["subtext"], padx=15, pady=5)
         self.status_label.pack()
 
         self.chat_container = ctk.CTkFrame(self, fg_color=COLORS["card"], corner_radius=30, border_width=2, border_color=COLORS["border"])
@@ -245,8 +174,9 @@ class MenvisGUI(ctk.CTk):
         self.btn_mic.grid(row=0, column=1)
 
     def _on_ai_ready(self):
-        self.status_label.configure(text="NEXUS ONLINE", text_color=COLORS["success"])
-        speak_gui("Menvis est prêt, Chef. Connexion API établie.")
+        provider = getattr(self.assistant.agent, "provider", "NEXUS") if self.assistant.agent else "NEXUS"
+        self.status_label.configure(text=f"NEXUS ONLINE [{provider.upper()}]", text_color=COLORS["success"])
+        speak_gui(f"Menvis est prêt, Chef. Connexion {provider} établie.")
 
     def write_log(self, text, sender):
         self.log_box.configure(state="normal")
@@ -262,6 +192,7 @@ class MenvisGUI(ctk.CTk):
             while True:
                 m = GUI_QUEUE.get_nowait()
                 if m["type"] == "speak": self.write_log(m["text"], Config.ASSISTANT_NAME)
+                elif m["type"] == "user_msg": self.write_log(m["text"], "VOUS")
                 elif m["type"] == "status": 
                     color = m.get("color", COLORS["subtext"])
                     self.status_label.configure(text=m["text"], text_color=color)
@@ -279,22 +210,37 @@ class MenvisGUI(ctk.CTk):
 
     def _toggle_mic(self):
         if self.recording_active:
+            # STOP RECORDING
             self.recording_active = False
-            self.btn_mic.configure(fg_color=COLORS["accent"])
-        else:
-            self.recording_active = True
-            self.btn_mic.configure(fg_color=COLORS["success"])
-            threading.Thread(target=self._mic_loop, daemon=True).start()
+            self.btn_mic.configure(fg_color=COLORS["accent"], text="🎙️")
+            self.status_label.configure(text="TRANSCRIPTION...", text_color=COLORS["accent"])
+            
+            def _stop_and_process():
+                audio_file = self.recorder.stop()
+                if audio_file:
+                    from skills.voice_input import transcribe_file
+                    text = transcribe_file(audio_file)
+                    if text:
+                        GUI_QUEUE.put({"type": "user_msg", "text": text})
+                        self.assistant.ask(text)
+                
+                provider = getattr(self.assistant.agent, "provider", "ONLINE") if self.assistant.agent else "ONLINE"
+                GUI_QUEUE.put({"type": "status", "text": f"NEXUS ONLINE [{provider.upper()}]", "color": COLORS["success"]})
 
-    def _mic_loop(self):
-        try:
-            from skills.voice_input import listen_to_user
-            while self.recording_active:
-                t = listen_to_user(silent_mode=True)
-                if t:
-                    self.write_log(t, "VOCAL")
-                    threading.Thread(target=self.assistant.ask, args=(t,), daemon=True).start()
-        except Exception: self.recording_active = False
+            threading.Thread(target=_stop_and_process, daemon=True).start()
+        else:
+            # START RECORDING
+            success = self.recorder.start()
+            if success:
+                self.recording_active = True
+                self.btn_mic.configure(fg_color=COLORS["danger"], text="⏹")
+                self.status_label.configure(text="ENREGISTREMENT...", text_color=COLORS["danger"])
+            else:
+                self.status_label.configure(text="ERREUR MICRO", text_color=COLORS["danger"])
+                speak_gui("Désolé, je ne parviens pas à ouvrir votre micro.")
+
+    # _mic_loop est obsolète avec le nouveau système start/stop
+
 
     def _init_bars(self):
         w = 1000 
@@ -317,6 +263,6 @@ class MenvisGUI(ctk.CTk):
         self.after(40, self._animate)
 
 if __name__ == "__main__":
-    print("\n>>> NEXUS VERSION 2.2 (Pure Local) LOADED <<<", flush=True)
+    print("\n>>> NEXUS VERSION 3.0 (Cascade: Groq→Gemini→OpenRouter→Ollama) LOADED <<<", flush=True)
     app = MenvisGUI()
     app.mainloop()
